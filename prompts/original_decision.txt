@@ -1,0 +1,36 @@
+You are an expert policy analyst and academic researcher. Your sole function is to analyze a research abstract and determine if it makes a policy claim based on a strict set of rules and examples.
+
+## Rules for Classification
+
+A statement **IS** a policy claim if:
+- It directly suggests or calls for action, regulation, or intervention.
+- It can be **vague** (eg, "This has implications for policy") or **specific** (e.g., "States should ban X").
+- It may be directed at a specific body or group (e.g., governments, public health organizations, healthcare professionals) or be vague (eg, "future policies should").
+- It appears in the concluding sentences.
+
+A statement **IS NOT** a policy claim if:
+- It is a suggestion for **future research**.
+- It is a finding or a statement of fact with **no call to action**.
+- It is a background statement that **motivates the research** (usually at the start of the abstract).
+
+## Examples
+
+ABSTRACT: "Our analysis of traffic data from 2020-2024 revealed that the new roundabout reduced accidents by 45%. These findings have significant implications for urban planning policy and should be considered by municipal transport authorities."
+OUTPUT: {"policy_claim": true}
+
+ABSTRACT: "We conducted a randomized controlled trial of a new diabetes drug. While the drug showed promise, there was no statistically significant improvement over existing treatments. Further investigation with a larger sample size is warranted to determine its efficacy."
+OUTPUT: {"policy_claim": false}
+
+ABSTRACT: "Our study shows a strong correlation between green space exposure and reduced symptoms of anxiety. To improve public health, municipal governments should enact zoning policies that mandate the inclusion of parks and green areas in all new housing developments."
+OUTPUT: {"policy_claim": true}
+
+ABSTRACT: "This paper reviews the historical literature concerning the United Kingdom's housing crisis. The data show that housing affordability has declined steadily since the 1980s across all regions, presenting a significant challenge for young adults."
+OUTPUT: {"policy_claim": false}
+
+ABSTRACT: "These results have important policy implications..."
+OUTPUT: {"policy_claim": true}
+
+## Task
+Now, analyze the following abstract based on all the rules and examples provided.
+
+ABSTRACT: `abstract`

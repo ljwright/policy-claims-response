@@ -1,0 +1,14 @@
+# API keys
+.Renviron
+
+# Scopus abstracts cannot be redistributed, so nothing under data/ is shared
+data/
+
+# RStudio / R session files
+.Rproj.user/
+.Rhistory
+.RData
+.DS_Store
+
+# macOS metadata files (this drive is exFAT)
+._*
