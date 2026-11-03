@@ -1,253 +1,131 @@
-# Policy claims: rerunning the classification with newer models
+# Policy claims: reclassifying abstracts with newer LLMs
 
 R code for the reply to Cartus, Handy & Swanson's letter on Bann et al. (2026),
-*Science or advocacy?* (AJE, doi:10.1093/aje/kwag196). It:
+*Science or advocacy?* (AJE, doi:10.1093/aje/kwag196). The paper used DeepSeek
+V3.1 to classify whether 45,807 epidemiology and public health abstracts make a
+policy claim. This code:
 
-1. rebuilds the paper's corpus from Scopus and **reproduces the published labels**
-   with the paper's model (DeepSeek V3.1, same prompt and settings) on a pilot sample;
-2. reclassifies every abstract with a **newer DeepSeek** (V4.1 Flash), prompt unchanged;
-3. ports the prompt to a **decision model** (Perplexity Decider V1.2), which returns
-   P(policy claim) instead of yes/no, and uses it three ways: a weighted claim
-   rate, results with uncertain abstracts filtered out, and how far yes/no labels
-   track certainty, including for the 115 Epidemiology abstracts the editors coded;
-4. tests whether a **fuller prompt** helps more than a newer model: a revised
-   prompt written on half of the human-coded abstracts, then tested on the other
-   half and on the editors' 115.
+1. rebuilds the paper's corpus from Scopus, with the paper's exclusions;
+2. classifies every abstract with three models and two prompts:
+   - **DeepSeek V3.1**, the paper's model, to replicate it;
+   - **DeepSeek V4.1 Flash**, a newer model from the same family, which also
+     returns token probabilities, giving P(claim);
+   - **Jev 1.14**, a decision model on OpenRouter's Decisions API, which returns
+     P(claim) directly;
+   - with the **original** prompt (the paper's, unchanged) and a **new**, more
+     detailed prompt written from the response authors' arguments;
+3. plots claim rates over time, and Jev's P(claim) for the Epidemiology
+   abstracts the response authors coded.
 
-Every model is scored against the three human-coded sets: the paper's gold
-standard (n=204), its sample stratified by period (n=400), and the editors' 115.
+## Folder structure
 
-## Results of the 27 October 2026 runs
+```
+code/
+  01_make_scopus_corpus.R   Downloads the 10 journals (1990-2024) and applies the paper's exclusions
+  02_classify_abstracts.R   Sends every abstract to each model and prompt, then parses the replies
+  03_analysis.R             Figures
+prompts/
+  original_chat.txt         The paper's prompt, unchanged
+  new_chat.txt              The new prompt
+  *_decision.txt            The same prompts adapted for the Decisions API (see below)
+output/step_03/             Figures
+data/                       Not shared (see below)
+```
 
-The full tables are in `output/summary.md`. In brief:
-
-- **The pipeline reproduces the published labels.** The V3.1 rerun agrees with
-  them on 96.7% of the 1,681 pilot abstracts (kappa 0.92), about as closely as
-  the repository's two earlier runs agree with each other.
-- **The paper's conclusions hold for every model and prompt.** Newer models find
-  2-6 points more claims in every period (overall 28.6-31.1%, against 25.6%
-  published), so the rise from the 1990s to 2020-24 is the same (17-20 points).
-  Epidemiology stays lowest and Lancet Public Health highest, and the design and
-  keyword patterns hold. This also holds with claims weighted by P(claim), with
-  only confident claims, and with uncertain abstracts excluded, except that the
-  design pattern breaks under Decider's weighted rate.
-- **Newer models agree better with the blind-coded stratified sample** (held-out
-  half, kappa): 0.55 published, 0.66 V4.1 Flash, 0.74 Decider V1.2. On the gold
-  standard these three score 0.80-0.83.
-- **The revised prompt did not improve significantly on the paper's prompt.** On
-  the held-out half it is right on 272 of 305 human labels, against 269 (McNemar
-  p = 0.61): better on the stratified sample (kappa 0.73 against 0.66) and worse
-  on the gold standard (0.74 against 0.80). On the editors' 115 it does best of
-  all runs: 72% of its claims are ones the editors confirmed, against 62%
-  published and 65% for the paper's prompt (80 of 112 right, against 72;
-  p = 0.12). Every run still calls at least half of the editors' 43 rejections
-  claims.
+Each script is self-contained: it sources no other script, and reads the files
+earlier scripts saved in `data/` (plus, for `03_analysis.R`, the coding file
+described under "Data not included"). Each is split into numbered
+sections. The sections that download or classify save their results before the
+next section starts, so later sections can be rerun on their own.
 
 ## Running it
 
-Open `policy_claims.Rproj` in RStudio. Put your keys in `.Renviron`
-(`OPENROUTER_API_KEY`, `SCOPUS_API_KEY`), then restart R. Source the scripts in order:
+Open `Policy Claims Response.Rproj` in RStudio; all paths are relative to this
+folder. Put your keys in `.Renviron` (`SCOPUS_API_KEY`, `OPENROUTER_API_KEY`) and
+restart R. Packages: tidyverse, httr2, glue, fs, tictoc, readxl, patchwork,
+stringi, jsonlite, systemfonts and ragg.
+
+The figures use Open Sans, which `03_analysis.R` downloads from Google Fonts on
+its first run. To preview them in RStudio, set Tools > Global Options > General >
+Graphics > Backend to AGG; the default backend can't use downloaded fonts.
 
 | Script | What it does | Cost | Time |
 |---|---|---|---|
-| `shared_functions.R` | Saves the functions several scripts use to `data/shared_functions.rds`. Run it again after editing it | free | seconds |
-| `00_check_setup.R` | Confirms the prompt file is identical to the paper's, the keys work, Scopus returns abstracts, and every model answers two test abstracts | < $0.01 | 1 min |
-| `01_download_scopus.R` | Downloads the 10 journals, 1990-2024 (about 2,400 requests). Needs the UCL network/VPN or `SCOPUS_INSTTOKEN`. Up to three copies can run at once, each given some of the journals (see the script) | free | 15 min with three copies |
-| `02_build_corpus.R` | Applies the paper's filters, links the published labels and the human-coded sets, and draws the pilot sample | free | 1 min |
-| `05_analysis.R` | Run it now, before paying for anything: with only the published labels it checks that the rebuilt corpus reproduces Table 1 | free | 1 min |
-| `03_estimate_cost.R` | Cost and time of each run from OpenRouter's live prices | free | 1 min |
-| `04_run_models.R`, `stage <- "pilot"` | Every model on the pilot sample: the human-coded abstracts plus 1,000 random ones (about 1,700) | $2-3 | 10 min |
-| `04_run_models.R`, `stage <- "full"` | The runs set to `sample = "full"` in `config.R` | see below | 25-35 min each |
-| `06_prompt_development.R` | Scores one candidate prompt on the development half of the human-coded abstracts (see "Revised prompt") | $0.02 a version | 30 s |
-| `05_analysis.R` | Final tables, figures and `output/summary.md` | free | 1 min |
+| `01_make_scopus_corpus.R` | About 2,200 Scopus requests in parallel, at Scopus's limit of 9 a second. Abstracts need an institutional network (UCL VPN, with all traffic through it). Saves `data/step_01/scopus_corpus.Rds`: 46,279 abstracts | free | 5 min |
+| `02_classify_abstracts.R` | 6 specifications × 46,279 abstracts through OpenRouter, 30 requests at a time. Saves `data/step_02/classifications.Rds` | about $38 | 30-60 min per specification |
+| `03_analysis.R` | Saves the figures in `output/step_03/` | free | 1 min |
 
-`04_run_models.R` prints each run's estimate and asks before starting. Results
-are saved every 500 abstracts, so you can stop a run (Esc) and rerun the script
-to resume. Each run stops at its `max_cost_usd` cap (checked between batches, so
-it can go over by at most one batch). It also stops if every request in a batch
-fails, for example once the OpenRouter key's credit limit is reached: fix the
-cause and rerun to resume. Runs can go at the same time from separate
-terminals, for example `Rscript 04_run_models.R full decider_v12`.
+`02_classify_abstracts.R` saves the replies in batches of 1,000 and skips
+abstracts that already have a successful reply, so a stopped run resumes where it
+left off. It stops if every request in a batch fails (for example, when the
+OpenRouter credit runs out). Specifications can run at the same time from
+separate terminals, by passing their numbers:
 
-Each numbered script reads top to bottom and sources no other script's code:
-- `config.R` for its settings, which is all that file holds;
-- the shared functions it needs, loaded from the copy `shared_functions.R` saves;
-- its own functions, under "Functions";
-- its steps.
+```
+Rscript code/02_classify_abstracts.R 3 4
+```
 
-`shared_functions.R` saves a checksum of itself with the functions, and every
-script stops if the file has changed since it was last run, so an edited shared
-function can't be silently skipped.
-
-`tests/test_functions.R` holds unit tests for the parsers, the prompt port,
-filters, the development split and statistics:
-`testthat::test_file("tests/test_functions.R")`. It reads each function from the
-file it is written in, without running that file's steps.
-
-## Cost and time
-
-What the runs cost on 27 October 2026 (the OpenRouter key's own total: $6.96):
-
-| Run | Abstracts | Cost | Time |
-|---|---|---|---|
-| DeepSeek V3.1 rerun (pilot sample) | 1,696 | $0.40 | 5 min |
-| DeepSeek V4.1 Flash | 46,279 | $2.74 | 33 min |
-| DeepSeek V4.1 Flash, revised prompt | 46,279 | $2.93 | 32 min |
-| Perplexity Decider V1.2 | 46,279 | $0.85 | 25 min |
-| Prompt development (4 runs on the development half) | 298 each | $0.08 | 2 min |
-
-V4.1 Flash and Decider went at 25-35 abstracts a second with 16 requests in
-flight (V3.1's hosts managed 6), with three runs at a time. V4.1 Flash's hosts
-cache the fixed part of the prompt, so 62-74% of its
-input tokens were billed at about 4% of the normal price. No host serving V3.1 at
-its original FP8 precision discounts cached prompts.
-
-Configured but not run: V4 Pro 0813 (see "Things to know"), and TypeSafe Jev 1.14
-and GPT-6 Luna Decisions (pilot only; about $2 and $5 for the full corpus).
-
-## Model choices
-
-All three decision models named in the brief are live on OpenRouter's Decisions
-API (30 decision-model listings on 27 October 2026), so one function calls them all.
-
-- **Newer DeepSeek: V4.1 Flash 1017** (17 October 2026), in non-thinking mode
-  like the paper's `deepseek-chat`. Staying in the paper's model family means a
-  change in results reflects a newer model rather than another company's, and the
-  weights are open (MIT), as the paper argued they should be. It also returns
-  token probabilities, so P(claim) is available for it. Gemini 3.8 Flash scores
-  about the same on general benchmarks (Artificial Analysis 41 against 39; LLM
-  Stats 49 against 50) but costs about five times as much for this workload, is
-  closed, and returns no token probabilities.
-- **Decision model: Perplexity Decider V1.2** (16 October 2026). It has open
-  weights (Apache 2.0), which suits the paper's reproducibility argument, and it
-  is the cheapest. Rao & Callison-Burch (arXiv:2609.29769) found Decider the
-  strongest single judge on most of their panels, and provider-reported
-  comparisons of earlier versions also put it ahead (Decider V1.1 79%, Jev 1.13
-  73% and GPT-6 Luna 69% accuracy on a JevBench subset). Most of these benchmarks
-  are vendor-reported; the human-coded sets are the real test.
+Set `n_abstracts` at the top of the script to try every specification on a few
+abstracts first.
 
 ## How the models are called
 
-- **Chat models** get the paper's prompt unchanged (`prompts/policy_claim_prompt.txt`,
-  checked against `code/3_run_llm_classification.py` by `00_check_setup.R`), with
-  the same system message, temperature (0.1), `max_tokens` (60) and JSON mode.
-  Reasoning is switched off. V3.1 is pinned to hosts running its original FP8
-  weights (SiliconFlow, falling back to CoreWeave), because DeepSeek's own API no
-  longer serves it. This OpenRouter account's privacy settings exclude DeepSeek's
-  own API (it may train on prompts), so V4.1 Flash runs on third-party hosts
-  serving FP8 weights that return token probabilities (Makora, falling back to
-  StreamLake or GMICloud).
-- **Decision models** get the same prompt as one yes/no ("noul") question, with
-  the abstract sent as the request's `state`. Only two edits were made, both
-  forced by the API (Prompts in `shared_functions.R`, and a unit test proves
-  nothing else changed):
-  1. The JSON output-format section is dropped, and its two answers become the
-     question's true/false criteria.
-  2. `ABSTRACT: {abstract}` / `OUTPUT:` becomes ``ABSTRACT: `abstract` ``.
+- **Chat models (DeepSeek)** get the paper's system message, temperature (0.1),
+  `max_tokens` (60) and JSON mode, with reasoning switched off. They run on hosts
+  serving the original FP8 weights, cheapest first; this OpenRouter account's
+  privacy settings exclude DeepSeek's own API. V4.1 Flash is limited to hosts that
+  return token probabilities for the whole answer, and P(claim) is the
+  probability of `true` against `false` at the answer token.
+- **Jev 1.14** gets each prompt as one yes/no question on the Decisions API, with
+  the abstract sent separately. Two edits make the prompt fit the API: the JSON
+  output-format section is removed (its two answers become the question's
+  criteria), and `ABSTRACT: {abstract}` / `OUTPUT:` becomes
+  ``ABSTRACT: `abstract` ``. A claim is P(claim) >= 0.5.
 
-  A claim is P(claim) >= 0.5; the uncertain band is 0.2-0.8. Both are set in
-  `config.R`.
-- **The revised prompt** (`prompts/policy_claim_prompt_v2.txt`) is used by the
-  `deepseek_v41_flash_prompt2` run through its `prompt_file` setting. Everything
-  else matches the `deepseek_v41_flash` run.
+## The new prompt
 
-## Revised prompt
+`prompts/new_chat.txt` keeps the paper's structure and examples but narrows what
+counts as a policy claim, following the response's arguments:
 
-The question is whether a fuller prompt, rather than a newer model, improves the
-classification. The paper's definition was kept: the paper's human coders
-applied the same definition as its prompt, and it deliberately includes vague
-claims. A revised prompt was written to apply that definition more precisely.
+- a claim calls on those who make or fund policy to act;
+- methodological recommendations are not claims;
+- nor are improvements to research, data collection or measurement that follow
+  from the study's own work;
+- nor is advice on routine practice that asks for no change in policy,
+  programmes or resources.
 
-1. **Split.** The gold-standard and stratified-400 abstracts were split at
-   random, within each set and human label, into a development half (298) and a
-   held-out half (304; one abstract is in both sets), with a fixed seed. The split is saved in
-   `prompts/development_split.csv`. Abstracts among the editors' 115 were always
-   held out, so the editors' coding never informed the prompt.
-2. **Development.** `06_prompt_development.R` runs a candidate prompt
-   (`prompts/development/`) on the development half with V4.1 Flash and writes
-   its errors for review; only development abstracts were read. Scores for every
-   version are in `output/tables/13_prompt_development.csv`.
-   - v00 is the paper's prompt, run twice: its kappa moved by 0.015 between runs.
-   - v01 counted endorsements of interventions as claims ("a promising
-     strategy"). It fixed 8 false negatives but added 10 false positives, because
-     the human coders labelled such statements both ways.
-   - v02 keeps the paper's rules and examples and adds exclusions for
-     recommendations to researchers about methods and data, for reported effects
-     of modelled interventions, and for policies that are only the subject of a
-     study. It also says that findings flagged as relevant to services count, and
-     adds four invented examples. It scored kappa 0.844 against 0.828-0.843, and
-     became the revised prompt.
-3. **Test.** The revised prompt was run once on every abstract, and
-   `05_analysis.R` compares it with the paper's prompt on the held-out half and
-   the editors' 115, abstract by abstract (`14_revised_vs_original_prompt.csv`,
-   exact McNemar tests).
+It adds three invented examples: a multiple-comparisons recommendation (not a
+claim), a questionnaire validation study (not a claim), and minimum unit pricing
+(a claim). It was written without looking at the response authors' coding.
 
-The two halves differ by chance: every run, including those no prompt was tuned
-for, scores lower on the held-out half (on the stratified sample the published
-labels have kappa 0.76 on the development half and 0.55 on the held-out half).
-So compare runs within a half, not across halves.
+## Results of the November 2026 runs
 
-## Outputs
+Share of the 46,279 abstracts classified as making a policy claim:
 
-`output/summary.md` has the headline numbers. Tables in `output/tables/`:
+| Model | Original prompt | New prompt | Cost (both prompts) |
+|---|---|---|---|
+| DeepSeek V3.1 | 27.6% | 13.2% | $26.62 |
+| DeepSeek V4.1 Flash | 29.5% | 17.1% | $6.05 |
+| Jev 1.14 | 33.9% | 25.8% | $5.29 |
 
-- `02_table1_by_run*`: Table 1 for every run. Each row gives the yes/no rate,
-  the weighted rate (mean P(claim)), the confident-claims rate (P >= 0.8) and the
-  rate with uncertain abstracts excluded, plus the share that is uncertain.
-- `03`, `04`: the time trend (odds ratio per decade), and whether each of the
-  paper's qualitative conclusions holds, for each run and each of those four
-  measures.
-- `07`, `08`: agreement between runs, and accuracy against each human-coded set,
-  separately for the development and held-out halves.
-- `10`, `11`: certainty against the published yes/no labels, and the
-  Epidemiology 115. The thresholds table answers: if only claims with
-  P >= t count, how many of the 115 remain, and what share do the editors confirm?
-- `12` and `fig6`: claim rates by period at thresholds from 0.1 to 0.9.
-- `13`, `14`: the prompt-development scores, and the revised prompt against the
-  paper's prompt on the same abstracts.
-- `15`, `fig8`, `fig9`: the paper's Figure 1 (each year's share of abstracts
-  labelled a claim, with the paper's LOWESS smooth) for each set of labels, and
-  the cut-off against the weighted average (mean P(claim)) for the runs that give
-  P(claim).
-- `16`, `fig10`, `fig11`: Decider's P(claim) for the Epidemiology 115 by Cartus et
-  al.'s coding, and for the stratified 400 by whether the paper's two coders
-  agreed. The gold standard is left out of `fig11` because its second lead coder
-  coded only 94 of its 204 abstracts.
+Every abstract got a parseable answer in every specification. V4.1 Flash's hosts
+cache the fixed part of the prompt (about 63% of input tokens were cached);
+V3.1's hosts don't discount cached prompts.
 
-## Things to know
+Figures in `output/step_03/`:
 
-- **The gold-standard sheet holds labels from an earlier run.** Its
-  `llm_policy_claim` column disagrees with the published labels on 13 of 203
-  abstracts. The paper's validation figures (kappa 0.80, and "sensitivity 76.8%,
-  specificity 98.6%", which are PPV and NPV with the gold standard as truth) come
-  from that column. Scored against the gold standard, the published labels do
-  better: kappa 0.86, sensitivity 88.9%, specificity 96.8%, PPV 88.9%. The
-  400-abstract sheet matches the published labels exactly. This code always uses
-  the published labels.
-- **Which V3.1 snapshot?** The paper's script called `deepseek-chat`, an alias that
-  moved to V3.1-Terminus on 22 September 2025 and V3.2-Exp on 29 September 2025.
-  The rerun of `deepseek/deepseek-chat-v3.1` reproduces the published labels
-  (96.7% agreement), but labels slightly more claims (44 abstracts the other way
-  round against 11). The gold sheet's earlier run differs from the published
-  labels in the same direction.
-- **The editors' 115 can only show precision.** All 115 are abstracts the
-  published run called claims, so a run can be scored on how many it keeps and
-  how many of those the editors confirm. New claims elsewhere in Epidemiology
-  were never coded. The revised prompt labels 3.9% of all Epidemiology abstracts
-  as claims (published 3.7%), so it adds about as many new Epidemiology claims as
-  it drops.
-- **V4 Pro is configured but blocked.** This OpenRouter account's privacy
-  settings exclude DeepSeek's own API. To run V4 Pro, allow providers that may
-  train on prompts, or route it to third-party FP8 hosts as for V4.1 Flash. On
-  hosts that return token probabilities and cache the prompt, that would cost
-  roughly $20 for the corpus.
-- **Scopus changes over time.** The rebuilt corpus has 46,279 abstracts against
-  the paper's 45,807; Scopus has added records since, mostly for 2010-2019.
-  Published labels are matched by DOI (the public file has no Scopus IDs), so
-  45,667 abstracts have one, and runs are compared on abstracts every run labelled.
-- **Probabilities are not comparable across models.** Each model has its own
-  calibration: V4.1 Flash's token probabilities are below 0.2 or above 0.8 for
-  over 90% of abstracts, while Decider's are more spread out. Check thresholds against the
-  human-coded sets (`fig7_calibration.png`) before relying on them.
-- `data/` holds Scopus abstracts, which cannot be redistributed, so it is
-  gitignored. So is `.Renviron`.
+- `trends.png`: LOESS smooth of each year's share of abstracts classified as a
+  claim, by model and prompt.
+- `epidemiology_probabilities.png`: Jev's P(claim) for the Epidemiology abstracts
+  the response authors coded, by their coding.
+- `figure_01.png`: the two combined.
+
+## Data not included
+
+- `data/` holds Scopus abstracts, which can't be redistributed, so it is
+  gitignored; rerun `01_make_scopus_corpus.R` to rebuild it. Scopus adds records
+  over time, so the rebuilt corpus (46,279) is larger than the paper's (45,807).
+- `03_analysis.R` reads the response authors' coding of the Epidemiology
+  abstracts from `../Notes/epidemiology_policy_claims_review.csv`, which is
+  outside this folder and not included.
+- `.Renviron` holds the API keys and is gitignored.

@@ -12,3 +12,6 @@ data/
 
 # macOS metadata files (this drive is exFAT)
 ._*
+
+# Default device file from running scripts with Rscript
+Rplots.pdf

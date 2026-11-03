@@ -1,6 +1,7 @@
 library(tidyverse)
 library(readxl)
 library(glue)
+library(patchwork)
 library(fs)
 
 rm(list = ls())
@@ -25,26 +26,22 @@ loess_span <- 0.5
 cbbPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73",
                 "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
 
-# Share of each human-coded group whose P(claim) falls in each tenth (0-0.1,
-# 0.1-0.2, ...), by model and prompt. Bars rather than densities, as DeepSeek's
-# probabilities are almost all exactly 0 or 1.
-plot_p_bars <- function(df, fill_title) {
-  df %>%
-    mutate(p_bin = pmin(floor(p_claim * 10), 9) / 10 + 0.05) %>% # Bin midpoint
-    count(model_clean, prompt_clean, coding, p_bin) %>%
-    mutate(pct = 100 * n / sum(n), .by = c(model_clean, prompt_clean, coding)) %>%
-    ggplot(aes(x = p_bin, y = pct, fill = coding)) +
-    geom_col(position = position_dodge(preserve = "single"), width = 0.09) +
-    facet_grid(prompt_clean ~ model_clean) +
-    scale_x_continuous(breaks = seq(0, 1, 0.2), limits = c(0, 1)) +
-    scale_fill_manual(values = group_colours) +
-    labs(x = "P(policy claim)", y = "Share of group (%)", fill = fill_title) +
-    theme_minimal() +
-    theme(legend.position = "bottom", panel.grid.minor = element_blank())
-}
+# Open Sans, downloaded from Google Fonts on the first run
+plot_font <- "Open Sans"
+systemfonts::get_from_google_fonts(plot_font)
+
+# Font sizes in points, true to size as the plots are saved in cm
+font_sizes <- theme(text = element_text(family = plot_font),
+                    axis.title = element_text(size = 10),
+                    legend.title = element_text(size = 10),
+                    axis.text = element_text(size = 9),
+                    legend.text = element_text(size = 9),
+                    strip.text = element_text(size = 9),
+                    plot.tag = element_text(size = 10)) # The a. and b. in figure_01
+
 
 # 2. Policy Claims Over Time ----
-classifications %>%
+p_trend <- classifications %>%
   select(spec_id, scopus_id, model_name, prompt_name, label, p_claim) %>%
   left_join(scopus_corpus %>%
               select(scopus_id, abbrev, year),
@@ -65,11 +62,16 @@ classifications %>%
        colour = "LLM", linetype = "Prompt") +
   theme_minimal() +
   theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
-        legend.position = "bottom", 
-        legend.box = "vertical")
+        legend.position = "bottom",
+        legend.box = "vertical",
+        legend.spacing.y = unit(0, "pt"), # Gap between the two legends
+        legend.margin = margin(0, 0, 0, 0)) +
+  font_sizes
+
+p_trend
 ggsave("output/step_03/trends.png",
        width = 16, height = 9.9, units = "cm",
-       dpi = 300, bg = "white")
+       dpi = 600, bg = "white")
 
 # 3. Disagreement ----
 epi_coding <- read_csv("../Notes/epidemiology_policy_claims_review.csv",
@@ -86,7 +88,7 @@ epi_coding <- read_csv("../Notes/epidemiology_policy_claims_review.csv",
             by = "doi") %>%
   drop_na()
 
-classifications %>%
+p_prob <- classifications %>%
   filter(model_name == "jev_114",
          !is.na(p_claim)) %>%
   select(spec_id, model_name, prompt_name, scopus_id, p_claim) %>%
@@ -99,15 +101,30 @@ classifications %>%
   aes(x = p_claim, 
       y = after_stat(ifelse(count == 0, NA, density)),
       fill = coding) +
-  facet_grid(~ prompt_clean) +
+  facet_wrap(~ prompt_clean, ncol = 1, scale = "free_y") +
   geom_histogram(position = "identity", alpha = 0.7) +
   scale_x_continuous(limits = c(0, 1)) +
   scale_fill_manual(values = cbbPalette[c(6, 2)]) +
   theme_bw() +
-  theme(legend.position = "bottom") +
-  labs(x = "Probability Abstract Contains Policy Claim (Jev v1.14)",
+  theme(legend.position = "bottom",
+        axis.title.y = element_text(angle = 0, vjust = 0.5)) +
+  font_sizes +
+  labs(x = "Probability Abstract Contains\nPolicy Claim (Jev v1.14)",
        y = "Density",
        fill = "Cartus et al. Coding")
+
+p_prob
 ggsave("output/step_03/epidemiology_probabilities.png",
        width = 16, height = 9.9, units = "cm",
-       dpi = 300, bg = "white")
+       dpi = 600, bg = "white")
+
+
+# 4. Join Plots ----
+p_trend / 
+  p_prob +
+  plot_layout(heights = c(4, 6)) +
+  plot_annotation(tag_levels = "a",
+                  tag_suffix = ".")
+ggsave("output/step_03/figure_01.png",
+       width = 16, height = 16, units = "cm",
+       dpi = 600, bg = "white")
