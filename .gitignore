@@ -3,6 +3,7 @@
 
 # Scopus abstracts cannot be redistributed, so nothing under data/ is shared
 data/
+data.zip
 
 # RStudio / R session files
 .Rproj.user/

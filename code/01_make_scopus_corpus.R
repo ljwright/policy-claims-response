@@ -12,19 +12,23 @@ dir_create("data/step_01")
 scopus_api_key <- Sys.getenv("SCOPUS_API_KEY")
 scopus_requests_per_second <- 9 # Scopus Search API limit per key (and 20,000 a week)
 
-scopus_spec <- tribble(
-  ~abbrev,                   ~issn,
-  "int_j_epidemiol",         "0300-5771",
-  "am_j_prev_med",           "0749-3797",
-  "prev_med",                "0091-7435",
-  "epidemiology",            "1044-3983",
-  "j_epidemiol_comm_health", "0143-005X",
-  "lancet_public_health",    "2468-2667",
-  "am_j_public_health",      "0090-0036",
-  "eur_j_public_health",     "1101-1262",
-  "am_j_epidemiol",          "0002-9262",
-  "eur_j_epidemiol",         "0393-2990"
-) %>%
+journal_dict <- tribble(
+  ~abbrev,                   ~issn,       ~journal_name,                                  ~short_name,
+  "int_j_epidemiol",         "0300-5771", "International Journal of Epidemiology",        "Int J Epidemiol",
+  "am_j_prev_med",           "0749-3797", "American Journal of Preventive Medicine",      "Am J Prev Med",
+  "prev_med",                "0091-7435", "Preventive Medicine",                          "Prev Med",
+  "epidemiology",            "1044-3983", "Epidemiology",                                 "Epidemiology",
+  "j_epidemiol_comm_health", "0143-005X", "Journal of Epidemiology and Community Health", "J Epidemiol Community Health",
+  "lancet_public_health",    "2468-2667", "The Lancet Public Health",                     "Lancet Public Health",
+  "am_j_public_health",      "0090-0036", "American Journal of Public Health",            "Am J Public Health",
+  "eur_j_public_health",     "1101-1262", "European Journal of Public Health",            "Eur J Public Health",
+  "am_j_epidemiol",          "0002-9262", "American Journal of Epidemiology",             "Am J Epidemiol",
+  "eur_j_epidemiol",         "0393-2990", "European Journal of Epidemiology",             "Eur J Epidemiol"
+)
+saveRDS(journal_dict, "data/step_01/journal_dict.Rds")
+
+scopus_spec <- journal_dict %>%
+  select(-journal_name) %>%
   expand_grid(year = 1990:2024)
 
 scopus_error_text <- function(resp){
@@ -75,7 +79,7 @@ while (nrow(to_fetch) > 0) {
   resps <- req_perform_parallel(to_fetch$req, on_error = "continue", max_active = 20)
   ok <- map_lgl(resps, ~ inherits(.x, "httr2_response"))
   message(str_glue("Page {to_fetch$page[1]}: {sum(ok)} of {length(ok)} requests succeeded"))
-
+  
   scopus_resps <- c(scopus_resps, list(mutate(to_fetch, resp = resps)))
   to_fetch <- to_fetch %>%
     mutate(page = page + 1, req = map2(resps, req, next_page)) %>%
@@ -97,7 +101,7 @@ parse_scopus_entry <- function(entry) {
   affiliations <- entry$affiliation
   country <- if (length(affiliations) > 0) affiliations[[1]][["affiliation-country"]]
   keywords <- entry$authkeywords
-
+  
   tibble(
     scopus_id = entry[["dc:identifier"]] %||% NA_character_,
     doi = entry[["prism:doi"]] %||% NA_character_,
