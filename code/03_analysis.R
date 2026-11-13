@@ -179,6 +179,16 @@ ggsave("output/step_03/figure_01.png",
        dpi = 600, bg = "white")
 
 
+# 5. Proportions ----
+classifications %>%
+  group_by(model_name, prompt_name) %>%
+  summarise(prop = mean(label),
+            .groups = "drop") %>%
+  pivot_wider(names_from = prompt_name,
+              values_from = prop) %>%
+  mutate(diff = new - original)
+
+
 # OFFCUTS ----
 # p_prob <- classifications %>%
 #   filter(model_name == "jev_114",
